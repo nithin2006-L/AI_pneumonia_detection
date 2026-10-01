@@ -1,0 +1,12 @@
+.
+├── app.py                      # Core Flask application, routes, and validation logic
+├── model.py                    # PyTorch HybridPneumoniaModel, CLAHE, & Grad-CAM routines
+├── pneumonia_hybrid_model.pth  # Trained PyTorch model weights file
+├── clinical_portal.db          # SQLite database (auto-generated on initial launch)
+├── static/
+│   └── uploads/                # Saved original scans & generated heatmap overlays
+└── templates/
+    ├── login.html              # Authentication & registration interface
+    ├── dashboard.html          # Dynamic portal dashboard by user role
+    ├── report.html             # Detailed diagnostic report & Grad-CAM visualizer
+    └── duplicate_warning.html  # Handling duplicate SHA-256 scan detection
