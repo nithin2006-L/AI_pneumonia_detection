@@ -75,3 +75,5 @@ pneumonia_hybrid_model_new.pth Model checkpoint loaded by the application
 ## Deployment and data warning
 
 This repository is a development prototype, not a production-ready clinical system. Before exposing it to users, replace the hard-coded Flask secret and demo account credentials, add secure password storage and production authentication, configure a production WSGI server, and review privacy, consent, data retention, and access-control requirements. Do not commit real patient data, generated reports, or credentials to a public repository.
+
+<img width="1366" height="655" alt="Figure_1" src="https://github.com/user-attachments/assets/f4f32a3e-5248-4201-a29e-dfff8875a861" />
