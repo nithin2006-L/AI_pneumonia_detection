@@ -133,7 +133,7 @@ init_db()
 # Load Model
 device = torch.device("cpu")
 model = HybridPneumoniaModel(num_classes=2)
-MODEL_WEIGHTS_PATH = 'pneumonia_hybrid_model.pth'
+MODEL_WEIGHTS_PATH = 'pneumonia_hybrid_model_new.pth'
 if os.path.exists(MODEL_WEIGHTS_PATH):
     model.load_state_dict(torch.load(MODEL_WEIGHTS_PATH, map_location=device), strict=False)
 model.to(device)
