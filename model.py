@@ -32,7 +32,9 @@ class HybridPneumoniaModel(nn.Module):
         super(HybridPneumoniaModel, self).__init__()
         
         # Base Backbone: DenseNet-121
-        densenet = models.densenet121(weights=None)
+        densenet = models.densenet121(
+    weights=models.DenseNet121_Weights.DEFAULT
+)
         self.densenet = densenet
         self.features = densenet.features
         
