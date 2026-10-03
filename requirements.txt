@@ -19,3 +19,14 @@ matplotlib>=3.8.0
 
 # Database & Security
 cryptography>=41.0.5
+
+# Gemini Chatbot Integration
+google-genai>=0.1.0
+
+# DICOM File (.dcm) Processing Requirements
+pydicom>=2.4.0
+pylibjpeg>=2.0.0
+pylibjpeg-openjpeg>=1.4.0
+
+# Additional Utilities
+tenacity>=8.2.0
