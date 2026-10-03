@@ -1,22 +1,70 @@
 import os
 import hashlib
 import sqlite3
+import numpy as np
 import torch
 import torch.nn.functional as F
+import cv2
 from torchvision import transforms
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 from model import HybridPneumoniaModel, apply_clahe, generate_gradcam
 from PIL import Image
 from datetime import datetime
+import time
+from google import genai
+from google.genai import types
 
 app = Flask(__name__)
 app.secret_key = 'pneumonia_enterprise_clinical_key_v10'
 
-UPLOAD_FOLDER = os.path.join('static', 'uploads')
+# Environment Variable Key Initialization with Fallback Check
+api_key = os.environ.get("GEMINI_API_KEY")
+if not api_key:
+    print("WARNING: GEMINI_API_KEY environment variable is missing. Chatbot features will fail.")
+
+gemini_client = genai.Client(api_key=api_key) if api_key else None
+
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, 'static', 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 DB_PATH = 'clinical_portal.db'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'dcm'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# ---------------------------------------------------------
+# X-Ray Validation (Handles Blue-tinted X-rays)
+# ---------------------------------------------------------
+def is_valid_xray(image_path_or_pil):
+    try:
+        if isinstance(image_path_or_pil, str):
+            ext = os.path.splitext(image_path_or_pil)[1].lower()
+            if ext == '.dcm':
+                return True
+            img_bgr = cv2.imread(image_path_or_pil)
+        else:
+            img_np = np.array(image_path_or_pil.convert('RGB'))
+            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+
+        if img_bgr is None:
+            return False
+
+        hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+        saturation = hsv[:, :, 1]
+        mean_sat = np.mean(saturation)
+        
+        b, g, r = cv2.split(img_bgr.astype(float))
+        channel_std = np.std([np.mean(r), np.mean(g), np.mean(b)])
+
+        if mean_sat > 85.0 and channel_std > 35.0:
+            return False
+
+        return True
+    except Exception:
+        return False
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -27,7 +75,6 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # 1. Users Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,7 +89,6 @@ def init_db():
         )
     ''')
     
-    # 2. Reports Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,7 +110,6 @@ def init_db():
         )
     ''')
 
-    # 3. Comprehensive Audit Logs Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS audit_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -79,7 +124,7 @@ def init_db():
         )
     ''')
 
-    # Migration checks
+    # Migration Checks
     cursor.execute("PRAGMA table_info(users)")
     user_cols = [col[1] for col in cursor.fetchall()]
     if 'patient_type' not in user_cols:
@@ -105,7 +150,7 @@ def init_db():
     if 'after_state' not in audit_cols:
         cursor.execute("ALTER TABLE audit_logs ADD COLUMN after_state TEXT")
 
-    # Force admin@mail.com to have Administrator rights
+    # Seed Admin User
     cursor.execute("SELECT * FROM users WHERE LOWER(email)='admin@mail.com'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO users (email, password, name, role, patient_type, attending_doctor, institution, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -113,7 +158,7 @@ def init_db():
     else:
         cursor.execute("UPDATE users SET role='Administrator', status='ACTIVE' WHERE LOWER(email)='admin@mail.com'")
 
-    # Seed Default Doctor Accounts
+    # Seed Default Doctors
     default_doctors = [
         ('dr.smith@hospital.org', '123', 'Dr. Smith (Pulmonology)'),
         ('dr.jones@hospital.org', '123', 'Dr. Jones (Radiology)'),
@@ -130,12 +175,17 @@ def init_db():
 
 init_db()
 
-# Load Model
-device = torch.device("cpu")
+# Load Neural Network Model
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = HybridPneumoniaModel(num_classes=2)
 MODEL_WEIGHTS_PATH = 'pneumonia_hybrid_model_new.pth'
+
 if os.path.exists(MODEL_WEIGHTS_PATH):
-    model.load_state_dict(torch.load(MODEL_WEIGHTS_PATH, map_location=device), strict=False)
+    try:
+        model.load_state_dict(torch.load(MODEL_WEIGHTS_PATH, map_location=device, weights_only=True), strict=False)
+    except Exception:
+        model.load_state_dict(torch.load(MODEL_WEIGHTS_PATH, map_location=device), strict=False)
+
 model.to(device)
 model.eval()
 
@@ -220,15 +270,6 @@ def login():
         conn.close()
         return redirect(url_for('dashboard'))
 
-@app.route('/oauth_placeholder/<provider>')
-def oauth_placeholder(provider):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM users WHERE role='Doctor' AND status='ACTIVE'")
-    active_doctors = cursor.fetchall()
-    conn.close()
-    return render_template('login.html', error=f"{provider.capitalize()} single sign-on integration requires active institutional OAuth credentials.", doctors=active_doctors)
-
 @app.route('/register', methods=['POST'])
 def register():
     name = request.form.get('name')
@@ -270,17 +311,14 @@ def dashboard():
     cursor = conn.cursor()
     
     if user_role == 'Administrator':
-        # Admin sees ALL patient records across the hospital
         cursor.execute("SELECT * FROM reports ORDER BY id DESC")
         history_records = cursor.fetchall()
-        
         cursor.execute("SELECT COUNT(*) FROM reports WHERE prediction='PNEUMONIA'")
         pneumonia_count = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM reports WHERE prediction='NORMAL'")
         normal_count = cursor.fetchone()[0]
 
     elif user_role == 'Doctor':
-        # Doctor sees ONLY records evaluated by them or assigned to them
         cursor.execute("""
             SELECT * FROM reports 
             WHERE LOWER(evaluator_name)=LOWER(?) 
@@ -304,7 +342,6 @@ def dashboard():
         normal_count = cursor.fetchone()[0]
 
     else:
-        # Patient sees only their own personal records
         cursor.execute("SELECT * FROM reports WHERE user_id=? OR LOWER(patient_name)=LOWER(?) ORDER BY id DESC", (user_id, user_name))
         history_records = cursor.fetchall()
         
@@ -345,12 +382,18 @@ def predict():
         return redirect(url_for('index'))
     
     if session['role'] == 'Patient' and session.get('patient_type') == 'PRIVATE_HOSPITAL':
-        return "Access Denied: Private Hospital Patients cannot generate direct self-evaluations. Reports must be uploaded and verified by your attending physician.", 403
+        return "Access Denied: Private Hospital Patients cannot generate direct self-evaluations.", 403
 
     if 'file' not in request.files:
         return redirect(url_for('dashboard'))
     
     file = request.files['file']
+    if file.filename == '' or not allowed_file(file.filename):
+        return render_template('dashboard.html', error="Invalid File Format. Please upload PNG, JPG, JPEG, or DICOM (.dcm) files.",
+                               user=session['user'], role=session['role'], patient_type=session.get('patient_type', 'PUBLIC'),
+                               attending_doctor=session.get('attending_doctor', 'N/A'), institution=session['institution'],
+                               history=[], pneumonia_count=0, normal_count=0, total_count=0, doctors_list=[], audit_logs=[])
+
     patient_name = request.form.get('patient_name', session['user'])
     patient_age = request.form.get('patient_age', 0)
     patient_gender = request.form.get('patient_gender', 'Unspecified')
@@ -380,14 +423,32 @@ def predict():
                                        institution_name=institution_name)
 
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ext = os.path.splitext(file.filename)[1].lower()
+        
+        temp_filename = f"temp_{timestamp_str}{ext}"
         orig_filename = f"scan_{timestamp_str}.png"
         heatmap_filename = f"heatmap_{timestamp_str}.png"
         
+        temp_path = os.path.join(app.config['UPLOAD_FOLDER'], temp_filename)
         raw_path = os.path.join(app.config['UPLOAD_FOLDER'], orig_filename)
-        file.save(raw_path)
+        
+        file.save(temp_path)
 
-        enhanced_pil_img = apply_clahe(raw_path)
+        if not is_valid_xray(temp_path):
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            
+            return render_template('dashboard.html', 
+                                   error="Invalid Image Uploaded! The selected file does not appear to be a valid Chest X-ray. Please upload a genuine Chest Radiograph.",
+                                   user=session['user'], role=session['role'], patient_type=session.get('patient_type', 'PUBLIC'),
+                                   attending_doctor=session.get('attending_doctor', 'N/A'), institution=session['institution'],
+                                   history=[], pneumonia_count=0, normal_count=0, total_count=0, doctors_list=[], audit_logs=[])
+
+        enhanced_pil_img = apply_clahe(temp_path)
         enhanced_pil_img.save(raw_path)
+        
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
         img_tensor = transform(enhanced_pil_img).unsqueeze(0).to(device)
         
@@ -399,6 +460,7 @@ def predict():
             pred_class_idx = pred_idx.item()
 
         prediction = CLASS_LABELS[pred_class_idx]
+        
         overlay_img, _ = generate_gradcam(model, img_tensor, img_tensor)
 
         heatmap_path = os.path.join(app.config['UPLOAD_FOLDER'], heatmap_filename)
@@ -566,25 +628,64 @@ def toggle_doctor_status(doc_id):
     conn.close()
     return redirect(url_for('dashboard'))
 
+# ---------------------------------------------------------
+# Robust Chatbot API Route with Dynamic Model Fallback
+# ---------------------------------------------------------
+
+
 @app.route('/api/chat', methods=['POST'])
-def chatbot_api():
-    data = request.get_json() or {}
-    msg = data.get('message', '').strip().lower()
+def chat_api():
+    """API endpoint connected to the floating chatbot widget in dashboard.html."""
+    try:
+        if not gemini_client:
+            return jsonify({
+                'response': "GEMINI_API_KEY environment variable is not set on the server. Please check your system settings."
+            }), 500
 
-    if 'heatmap' in msg or 'color' in msg or 'red' in msg or 'blue' in msg:
-        reply = "Grad-CAM Heatmaps highlight AI focus: Red/warm zones indicate dense tissue opacification or fluid accumulation, while Blue/cool zones represent normal, clear lung aeration."
-    elif 'doctor' in msg or 'block' in msg or 'admin' in msg:
-        reply = "Hospital Admins manage doctor rosters via the Admin Panel. Admins can register new doctors or block access if a doctor leaves the hospital."
-    elif 'duplicate' in msg or 'hash' in msg:
-        reply = "The system uses SHA-256 cryptographic hashing to detect identical X-rays, preventing duplicate records while giving users the option to re-evaluate if required."
-    elif 'edit' in msg or 'delete' in msg or 'audit' in msg:
-        reply = "Doctors and Admins can edit patient demographics or delete reports. All edit and delete operations record full Before & After states in the System Audit Log."
-    elif 'private' in msg or 'public' in msg:
-        reply = "Public patients can upload scans independently. Private hospital patients are linked to an attending physician, and their reports are managed directly by authorized doctors."
-    else:
-        reply = "Hello! I am your Clinical AI Assistant. I can answer questions about Grad-CAM heatmaps, role permissions, duplicate detection, or report auditing."
+        data = request.get_json() or {}
+        user_message = data.get('message', '').strip()
 
-    return jsonify({'response': reply})
+        if not user_message:
+            return jsonify({'response': 'Please enter a valid message.'}), 400
 
+        system_prompt = (
+            "You are a helpful Clinical Assistant inside a Chest X-ray Pneumonia "
+            "Diagnostic Portal built with DenseNet-121 and Transformer Encoders. "
+            "Assist medical personnel and patients regarding diagnostic reports, "
+            "Grad-CAM visual interpretations, model confidence, and system navigation."
+        )
+
+        config_obj = types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            temperature=0.3
+        )
+
+        # Retry loop for transient 503 / network errors
+        models_to_try = ['gemini-3.8-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
+        
+        for model_name in models_to_try:
+            for attempt in range(2):  # Try each model up to 2 times
+                try:
+                    response = gemini_client.models.generate_content(
+                        model=model_name,
+                        contents=user_message,
+                        config=config_obj
+                    )
+                    return jsonify({'response': response.text})
+                except Exception as err:
+                    print(f"[Gemini Retry] Attempt {attempt+1} on {model_name} failed: {err}")
+                    time.sleep(1)  # Brief pause before retrying
+
+        # Fallback response if all models/attempts are busy
+        return jsonify({
+            'response': "The AI Clinical Assistant is currently experiencing high demand from Google services. Please try sending your query again in a few seconds."
+        })
+
+    except Exception as e:
+        print(f"Gemini Chat API Failure: {repr(e)}")
+        return jsonify({
+            'response': "System temporarily unavailable. Please try your request again shortly."
+        }), 500
+    
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=5000, debug=True)
