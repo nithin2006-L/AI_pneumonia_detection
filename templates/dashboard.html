@@ -4,8 +4,15 @@
     <meta charset="UTF-8">
     <title>Clinical Portal Dashboard</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Clinical Portal Dashboard</title>
+    <link href="[https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css](https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css)" rel="stylesheet">
+    <link href="[https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css](https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css)" rel="stylesheet">
+    <script src="[https://cdn.jsdelivr.net/npm/chart.js](https://cdn.jsdelivr.net/npm/chart.js)"></script>
     <style>
         body { background-color: #f8fafc; color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         .top-bar { background: #ffffff; border-bottom: 1px solid #e2e8f0; }
@@ -43,6 +50,21 @@
 </div>
 
 <div class="container my-4">
+
+    <!-- INVALID IMAGE / SYSTEM WARNING ALERT BANNER -->
+    {% if error %}
+    <div class="alert alert-danger alert-dismissible fade show mb-4 shadow-sm" role="alert" style="border-left: 5px solid #dc3545; background-color: #f8d7da; color: #842029;">
+        <div class="d-flex align-items-center">
+            <i class="bi bi-exclamation-triangle-fill me-3 fs-4 text-danger"></i>
+            <div>
+                <strong class="d-block fs-6">Validation Warning:</strong>
+                <span>{{ error }}</span>
+            </div>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+    {% endif %}
+
     <ul class="nav nav-tabs mb-4" id="portalTabs" role="tablist">
         {% if role != 'Patient' or patient_type != 'PRIVATE_HOSPITAL' %}
         <li class="nav-item">
@@ -108,8 +130,8 @@
                     </div>
 
                     <div class="mb-4">
-                        <label class="form-label text-secondary small fw-bold">Chest Radiograph File</label>
-                        <input type="file" name="file" class="form-control" accept="image/*" required>
+                        <label class="form-label text-secondary small fw-bold">Chest Radiograph File (.png, .jpg, .jpeg, .dcm)</label>
+                        <input type="file" name="file" class="form-control" accept="image/*,.dcm" required>
                     </div>
 
                     <button type="submit" class="btn btn-primary w-100 py-2 fw-bold" style="background-color: #0284c7; border: none;">Run Diagnostic Assessment</button>
@@ -160,7 +182,7 @@
                                 <td class="d-flex gap-2">
                                     <a href="/report/{{ rec['id'] }}" class="btn btn-sm btn-outline-primary fw-bold">View Report</a>
                                     {% if role in ['Doctor', 'Administrator'] %}
-                                    <form action="/delete_report/{{ rec['id'] }}" method="POST" onsubmit="return confirm('Are you sure you want to delete Report #{{ rec['id'] }}? Action will be logged in audit trail.');">
+                                    <form action="/delete_report/{{ rec['id'] }}" method="POST" onsubmit="return confirm('Are you sure you want to delete Report #{{ rec.id }}? Action will be logged in audit trail.');">
                                         <button type="submit" class="btn btn-sm btn-outline-danger fw-bold">Delete</button>
                                     </form>
                                     {% endif %}
@@ -186,7 +208,7 @@
                 <div class="row align-items-center">
                     <div class="col-md-6 text-center">
                         <div style="max-width: 280px; margin: 0 auto;">
-                            <canvas id="diagChart"></canvas>
+                            <canvas id="diagChart" data-chart-values="{{ [pneumonia_count, normal_count] | tojson }}"></canvas>
                         </div>
                     </div>
                     <div class="col-md-6">
@@ -330,40 +352,49 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="[https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js](https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js)"></script>
 {% if total_count > 0 %}
 <script>
-    const ctx = document.getElementById('diagChart').getContext('2d');
-    new Chart(ctx, {
-        type: 'pie',
-        data: {
-            labels: ['Pneumonia', 'Normal'],
-            datasets: [{
-                data: [{{ pneumonia_count }}, {{ normal_count }}],
-                backgroundColor: ['#dc2626', '#16a34a']
-            }]
-        }
-    });
+    const diagChartCanvas = document.getElementById('diagChart');
+    if (diagChartCanvas) {
+        const ctx = diagChartCanvas.getContext('2d');
+        const chartValues = JSON.parse(diagChartCanvas.dataset.chartValues);
+        new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: ['Pneumonia', 'Normal'],
+                datasets: [{
+                    data: chartValues,
+                    backgroundColor: ['#dc2626', '#16a34a']
+                }]
+            }
+        });
+    }
 </script>
 {% endif %}
 
 <script>
     function toggleChatbot() {
         const box = document.getElementById('chatbotBox');
+        if (!box) return;
         box.style.display = (box.style.display === 'flex') ? 'none' : 'flex';
     }
 
     function handleChatKey(e) {
-        if (e.key === 'Enter') sendChatMessage();
+        if (e.key === 'Enter') {
+            sendChatMessage();
+        }
     }
 
     function sendChatMessage() {
         const input = document.getElementById('chatInput');
+        const body = document.getElementById('chatBody');
+
+        if (!input || !body) return;
+
         const text = input.value.trim();
         if (!text) return;
 
-        const body = document.getElementById('chatBody');
-        
         const userMsg = document.createElement('div');
         userMsg.className = 'chat-msg user';
         userMsg.innerText = text;
@@ -374,21 +405,21 @@
 
         fetch('/api/chat', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({message: text})
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text })
         })
-        .then(res => res.json())
-        .then(data => {
+        .then((res) => res.json())
+        .then((data) => {
             const botMsg = document.createElement('div');
             botMsg.className = 'chat-msg bot';
-            botMsg.innerText = data.response;
+            botMsg.innerText = data.response || 'I could not generate a response.';
             body.appendChild(botMsg);
             body.scrollTop = body.scrollHeight;
         })
         .catch(() => {
             const botMsg = document.createElement('div');
             botMsg.className = 'chat-msg bot';
-            botMsg.innerText = "Query error. Please try again.";
+            botMsg.innerText = 'Query error. Please try again.';
             body.appendChild(botMsg);
             body.scrollTop = body.scrollHeight;
         });
