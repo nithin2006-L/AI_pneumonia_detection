@@ -1,70 +1,133 @@
 import os
 import hashlib
 import sqlite3
+import cv2
 import numpy as np
+import pydicom
 import torch
 import torch.nn.functional as F
-import cv2
 from torchvision import transforms
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 from model import HybridPneumoniaModel, apply_clahe, generate_gradcam
 from PIL import Image
 from datetime import datetime
-import time
-from google import genai
-from google.genai import types
+from flask import jsonify, session
+from authlib.integrations.flask_client import OAuth
+from xray_validation import validate_chest_xray
 
 app = Flask(__name__)
-app.secret_key = 'pneumonia_enterprise_clinical_key_v10'
+app.secret_key = os.environ.get(
+    'FLASK_SECRET_KEY',
+    'pneumonia_enterprise_clinical_key_v10'
+)
+app.config['MAX_CONTENT_LENGTH'] = 25 * 1024 * 1024  # 25 MB upload limit
 
-# Environment Variable Key Initialization with Fallback Check
-api_key = os.environ.get("GEMINI_API_KEY")
-if not api_key:
-    print("WARNING: GEMINI_API_KEY environment variable is missing. Chatbot features will fail.")
+# -----------------------------------------------------------------------------
+# Google OAuth configuration
+# Keep credentials in environment variables instead of hard-coding them.
+# -----------------------------------------------------------------------------
+oauth = OAuth(app)
 
-gemini_client = genai.Client(api_key=api_key) if api_key else None
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', 'YOUR_GOOGLE_CLIENT_ID')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', 'YOUR_GOOGLE_CLIENT_SECRET')
 
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-UPLOAD_FOLDER = os.path.join(BASE_DIR, 'static', 'uploads')
+google = oauth.register(
+    name='google',
+    client_id=GOOGLE_CLIENT_ID,
+    client_secret=GOOGLE_CLIENT_SECRET,
+    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+    client_kwargs={'scope': 'openid email profile'},
+)
+
+GOOGLE_CONFIGURED = (
+    bool(GOOGLE_CLIENT_ID)
+    and bool(GOOGLE_CLIENT_SECRET)
+    and not GOOGLE_CLIENT_ID.startswith('YOUR_')
+    and not GOOGLE_CLIENT_SECRET.startswith('YOUR_')
+)
+
+UPLOAD_FOLDER = os.path.join('static', 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 DB_PATH = 'clinical_portal.db'
+
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'dcm'}
 
 def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    return (
+        bool(filename)
+        and '.' in filename
+        and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    )
 
-# ---------------------------------------------------------
-# X-Ray Validation (Handles Blue-tinted X-rays)
-# ---------------------------------------------------------
-def is_valid_xray(image_path_or_pil):
+
+def load_dicom_as_pil(dicom_path):
+    """Convert a DICOM image into a normalized RGB PIL image."""
+    ds = pydicom.dcmread(dicom_path, force=False)
+
+    if not hasattr(ds, 'PixelData'):
+        raise ValueError('DICOM file does not contain pixel data.')
+
+    pixel_array = ds.pixel_array
+
+    # The current model pipeline expects one 2-D radiograph.
+    if pixel_array.ndim != 2:
+        raise ValueError('Unsupported DICOM image: expected a single 2-D chest radiograph.')
+
+    image = pixel_array.astype(np.float32)
+
+    # Apply DICOM rescale parameters when supplied.
+    slope = float(getattr(ds, 'RescaleSlope', 1.0))
+    intercept = float(getattr(ds, 'RescaleIntercept', 0.0))
+    image = image * slope + intercept
+
+    # MONOCHROME1 stores lower values as brighter pixels.
+    if str(getattr(ds, 'PhotometricInterpretation', '')).upper() == 'MONOCHROME1':
+        image = np.max(image) - image
+
+    finite_pixels = image[np.isfinite(image)]
+    if finite_pixels.size == 0:
+        raise ValueError('DICOM pixel data contains no valid numeric pixels.')
+
+    # Robust 1st-99th percentile normalization.
+    low, high = np.percentile(finite_pixels, [1, 99])
+    if high <= low:
+        low = float(np.min(finite_pixels))
+        high = float(np.max(finite_pixels))
+
+    if high <= low:
+        raise ValueError('DICOM image has no usable intensity variation.')
+
+    image = np.clip((image - low) / (high - low), 0.0, 1.0)
+    image_uint8 = (image * 255.0).astype(np.uint8)
+
+    return Image.fromarray(image_uint8, mode='L').convert('RGB')
+
+
+def validate_dicom(dicom_path):
+    """Validate that a DICOM contains usable radiograph pixel data."""
     try:
-        if isinstance(image_path_or_pil, str):
-            ext = os.path.splitext(image_path_or_pil)[1].lower()
-            if ext == '.dcm':
-                return True
-            img_bgr = cv2.imread(image_path_or_pil)
-        else:
-            img_np = np.array(image_path_or_pil.convert('RGB'))
-            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+        ds = pydicom.dcmread(dicom_path, stop_before_pixels=False, force=False)
 
-        if img_bgr is None:
-            return False
+        if not hasattr(ds, 'PixelData'):
+            return False, 'DICOM file does not contain pixel data.'
 
-        hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-        saturation = hsv[:, :, 1]
-        mean_sat = np.mean(saturation)
-        
-        b, g, r = cv2.split(img_bgr.astype(float))
-        channel_std = np.std([np.mean(r), np.mean(g), np.mean(b)])
+        pixel_array = ds.pixel_array
+        if pixel_array.ndim != 2:
+            return False, 'Only single-frame 2-D radiographs are supported.'
 
-        if mean_sat > 85.0 and channel_std > 35.0:
-            return False
+        if pixel_array.size == 0:
+            return False, 'DICOM image contains empty pixel data.'
 
-        return True
-    except Exception:
-        return False
+        if not np.isfinite(pixel_array.astype(np.float32)).any():
+            return False, 'DICOM image contains invalid pixel values.'
+
+        return True, ''
+    except Exception as exc:
+        return False, f'Invalid or unreadable DICOM file: {exc}'
+
+
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -75,6 +138,7 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
+    # 1. Users Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,6 +153,7 @@ def init_db():
         )
     ''')
     
+    # 2. Reports Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,6 +175,7 @@ def init_db():
         )
     ''')
 
+    # 3. Audit Logs Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS audit_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,7 +241,39 @@ def init_db():
 
 init_db()
 
-# Load Neural Network Model
+
+# def get_stat_counts():
+#     conn = get_db_connection()
+#     cursor = conn.cursor()
+#     try:
+#         cursor.execute("SELECT COUNT(*) FROM reports WHERE prediction='PNEUMONIA'")
+#         pneumonia = cursor.fetchone()[0]
+#         cursor.execute("SELECT COUNT(*) FROM reports WHERE prediction='NORMAL'")
+#         normal = cursor.fetchone()[0]
+#     finally:
+#         conn.close()
+#     return pneumonia, normal
+
+def get_stat_counts():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    role, uid, name = session['role'], session['user_id'], session['user']
+    if role == 'Administrator':
+        where, params = "1=1", ()
+    elif role == 'Doctor':
+        where = "(LOWER(evaluator_name)=LOWER(?) OR user_id IN (SELECT id FROM users WHERE LOWER(attending_doctor)=LOWER(?)))"
+        params = (name, name)
+    else:
+        where = "(user_id=? OR LOWER(patient_name)=LOWER(?))"
+        params = (uid, name)
+    cursor.execute(f"SELECT COUNT(*) FROM reports WHERE {where} AND prediction='PNEUMONIA'", params)
+    pneumonia = cursor.fetchone()[0]
+    cursor.execute(f"SELECT COUNT(*) FROM reports WHERE {where} AND prediction='NORMAL'", params)
+    normal = cursor.fetchone()[0]
+    conn.close()
+    return pneumonia, normal
+
+# Load Model
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = HybridPneumoniaModel(num_classes=2)
 MODEL_WEIGHTS_PATH = 'pneumonia_hybrid_model_new.pth'
@@ -302,7 +400,12 @@ def logout():
 def dashboard():
     if 'user' not in session:
         return redirect(url_for('index'))
-    
+    return render_dashboard()
+
+
+def render_dashboard(error=None, status=200):
+    """Render the dashboard with REAL data (history, counts, admin lists).
+    Optionally shows a warning banner, e.g. for rejected uploads."""
     user_id = session['user_id']
     user_role = session['role']
     user_name = session['user']
@@ -313,6 +416,7 @@ def dashboard():
     if user_role == 'Administrator':
         cursor.execute("SELECT * FROM reports ORDER BY id DESC")
         history_records = cursor.fetchall()
+        
         cursor.execute("SELECT COUNT(*) FROM reports WHERE prediction='PNEUMONIA'")
         pneumonia_count = cursor.fetchone()[0]
         cursor.execute("SELECT COUNT(*) FROM reports WHERE prediction='NORMAL'")
@@ -363,7 +467,8 @@ def dashboard():
 
     conn.close()
     
-    return render_template('dashboard.html', 
+    return render_template('dashboard.html',
+                           error=error,
                            user=session['user'], 
                            role=session['role'], 
                            patient_type=session.get('patient_type', 'PUBLIC'),
@@ -374,7 +479,7 @@ def dashboard():
                            normal_count=normal_count,
                            total_count=total_count,
                            doctors_list=doctors_list,
-                           audit_logs=audit_logs)
+                           audit_logs=audit_logs), status
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -389,10 +494,9 @@ def predict():
     
     file = request.files['file']
     if file.filename == '' or not allowed_file(file.filename):
-        return render_template('dashboard.html', error="Invalid File Format. Please upload PNG, JPG, JPEG, or DICOM (.dcm) files.",
-                               user=session['user'], role=session['role'], patient_type=session.get('patient_type', 'PUBLIC'),
-                               attending_doctor=session.get('attending_doctor', 'N/A'), institution=session['institution'],
-                               history=[], pneumonia_count=0, normal_count=0, total_count=0, doctors_list=[], audit_logs=[])
+        return render_dashboard(
+            error="Invalid file format. Please upload a PNG, JPG, JPEG, or DICOM (.dcm) chest X-ray.",
+            status=400)
 
     patient_name = request.form.get('patient_name', session['user'])
     patient_age = request.form.get('patient_age', 0)
@@ -404,6 +508,26 @@ def predict():
     if file:
         file_bytes = file.read()
         file.seek(0)
+
+        # ---------------------------------------------------------
+        # VALIDATION GATE: only genuine chest X-rays may continue.
+        # Anything else is rejected here and never reaches the model.
+        # ---------------------------------------------------------
+        validation = validate_chest_xray(file_bytes, file.filename)
+        if not validation.is_valid:
+            conn = get_db_connection()
+            conn.execute(
+                "INSERT INTO audit_logs (performed_by, user_role, action, before_state, after_state, details) "
+                "VALUES (?, ?, 'REJECTED_UPLOAD', 'UPLOADED', 'REJECTED', ?)",
+                (session['user'], session['role'],
+                 f"File '{file.filename}' rejected at stage '{validation.stage}': {validation.message}"))
+            conn.commit()
+            conn.close()
+            return render_dashboard(
+                error=f"Not a valid chest X-ray - {validation.message} "
+                      f"Please upload a frontal chest radiograph (PNG, JPG or DICOM).",
+                status=422)
+
         img_hash = compute_file_hash(file_bytes)
 
         if bypass_duplicate != 'true':
@@ -431,36 +555,76 @@ def predict():
         
         temp_path = os.path.join(app.config['UPLOAD_FOLDER'], temp_filename)
         raw_path = os.path.join(app.config['UPLOAD_FOLDER'], orig_filename)
-        
+        converted_dicom_path = None
+
         file.save(temp_path)
 
-        if not is_valid_xray(temp_path):
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-            
-            return render_template('dashboard.html', 
-                                   error="Invalid Image Uploaded! The selected file does not appear to be a valid Chest X-ray. Please upload a genuine Chest Radiograph.",
-                                   user=session['user'], role=session['role'], patient_type=session.get('patient_type', 'PUBLIC'),
-                                   attending_doctor=session.get('attending_doctor', 'N/A'), institution=session['institution'],
-                                   history=[], pneumonia_count=0, normal_count=0, total_count=0, doctors_list=[], audit_logs=[])
+        try:
+            # ---------------------------------------------------------
+            # Check 1: Normalize the (already validated) radiograph
+            # ---------------------------------------------------------
+            if ext == '.dcm':
+                valid_dicom, dicom_error = validate_dicom(temp_path)
+                if not valid_dicom:
+                    raise ValueError(dicom_error)
 
-        enhanced_pil_img = apply_clahe(temp_path)
-        enhanced_pil_img.save(raw_path)
-        
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+                dicom_pil_img = load_dicom_as_pil(temp_path)
+
+                # Reuse the existing CLAHE implementation through a temporary PNG.
+                converted_dicom_filename = f"converted_{timestamp_str}.png"
+                converted_dicom_path = os.path.join(
+                    app.config['UPLOAD_FOLDER'], converted_dicom_filename
+                )
+                dicom_pil_img.save(converted_dicom_path, format='PNG')
+                preprocessing_path = converted_dicom_path
+            else:
+                preprocessing_path = temp_path
+
+            # ---------------------------------------------------------
+            # Check 2: CLAHE Enhancement & Conversion to PNG
+            # ---------------------------------------------------------
+            enhanced_pil_img = apply_clahe(preprocessing_path)
+            enhanced_pil_img = enhanced_pil_img.convert('RGB')
+            enhanced_pil_img.save(raw_path, format='PNG')
+
+        except (ValueError, pydicom.errors.InvalidDicomError) as exc:
+            return render_dashboard(
+                error=f"Invalid Chest X-ray/DICOM upload: {exc}",
+                status=422)
+        finally:
+            for temporary_file in (temp_path, converted_dicom_path):
+                if temporary_file and os.path.exists(temporary_file):
+                    try:
+                        os.remove(temporary_file)
+                    except OSError:
+                        pass
 
         img_tensor = transform(enhanced_pil_img).unsqueeze(0).to(device)
         
+        # Inference
+        # Inference
         with torch.no_grad():
             outputs = model(img_tensor)
             probabilities = F.softmax(outputs, dim=1)
-            confidence, pred_idx = torch.max(probabilities, 1)
-            conf_percentage = round(confidence.item() * 100, 2)
-            pred_class_idx = pred_idx.item()
+            
+            # Pneumonia class probability (Index 1)
+            pneumonia_prob = probabilities[0][1].item()
+            
+            # Set Decision Threshold (e.g., 0.70 or 0.56)
+            threshold = 0.65
+            
+            if pneumonia_prob >= threshold:
+                pred_class_idx = 1
+                confidence_val = pneumonia_prob
+            else:
+                pred_class_idx = 0
+                confidence_val = probabilities[0][0].item() # Normal probability
+                
+            conf_percentage = round(confidence_val * 100, 2)
 
         prediction = CLASS_LABELS[pred_class_idx]
         
+        # Grad-CAM Heatmap
         overlay_img, _ = generate_gradcam(model, img_tensor, img_tensor)
 
         heatmap_path = os.path.join(app.config['UPLOAD_FOLDER'], heatmap_filename)
@@ -628,64 +792,145 @@ def toggle_doctor_status(doc_id):
     conn.close()
     return redirect(url_for('dashboard'))
 
-# ---------------------------------------------------------
-# Robust Chatbot API Route with Dynamic Model Fallback
-# ---------------------------------------------------------
-
-
 @app.route('/api/chat', methods=['POST'])
-def chat_api():
-    """API endpoint connected to the floating chatbot widget in dashboard.html."""
+def chatbot_api():
+    data = request.get_json() or {}
+    msg = data.get('message', '').strip().lower()
+
+    if 'heatmap' in msg or 'color' in msg or 'red' in msg or 'blue' in msg:
+        reply = "Grad-CAM Heatmaps highlight AI focus: Red/warm zones indicate dense tissue opacification or fluid accumulation, while Blue/cool zones represent normal, clear lung aeration."
+    elif 'doctor' in msg or 'block' in msg or 'admin' in msg:
+        reply = "Hospital Admins manage doctor rosters via the Admin Panel. Admins can register new doctors or block access if a doctor leaves the hospital."
+    elif 'duplicate' in msg or 'hash' in msg:
+        reply = "The system uses SHA-256 cryptographic hashing to detect identical X-rays, preventing duplicate records while giving users the option to re-evaluate if required."
+    elif 'edit' in msg or 'delete' in msg or 'audit' in msg:
+        reply = "Doctors and Admins can edit patient demographics or delete reports. All edit and delete operations record full Before & After states in the System Audit Log."
+    elif 'private' in msg or 'public' in msg:
+        reply = "Public patients can upload scans independently. Private hospital patients are linked to an attending physician, and their reports are managed directly by authorized doctors."
+    else:
+        reply = "Hello! I am your Clinical AI Assistant. I can answer questions about Grad-CAM heatmaps, role permissions, duplicate detection, or report auditing."
+
+    return jsonify({'response': reply})
+
+# -----------------------------------------------------------------------------
+# Google OAuth
+# -----------------------------------------------------------------------------
+@app.route('/auth/google')
+def google_login():
+    if not GOOGLE_CONFIGURED:
+        return render_template(
+            'login.html',
+            error='Google sign-in is not configured yet.',
+            doctors=[]
+        )
+
+    redirect_uri = url_for('google_callback', _external=True)
+    return google.authorize_redirect(redirect_uri)
+
+
+@app.route('/auth/google/callback')
+def google_callback():
+    if not GOOGLE_CONFIGURED:
+        return render_template(
+            'login.html',
+            error='Google sign-in is not configured yet.',
+            doctors=[]
+        )
+
     try:
-        if not gemini_client:
-            return jsonify({
-                'response': "GEMINI_API_KEY environment variable is not set on the server. Please check your system settings."
-            }), 500
+        token = google.authorize_access_token()
+        info = token.get('userinfo')
 
-        data = request.get_json() or {}
-        user_message = data.get('message', '').strip()
+        if not info or not info.get('email'):
+            return render_template(
+                'login.html',
+                error='Google sign-in did not return a valid email address.',
+                doctors=[]
+            )
 
-        if not user_message:
-            return jsonify({'response': 'Please enter a valid message.'}), 400
+        email = info['email'].strip().lower()
+        name = info.get('name') or email.split('@')[0].capitalize()
 
-        system_prompt = (
-            "You are a helpful Clinical Assistant inside a Chest X-ray Pneumonia "
-            "Diagnostic Portal built with DenseNet-121 and Transformer Encoders. "
-            "Assist medical personnel and patients regarding diagnostic reports, "
-            "Grad-CAM visual interpretations, model confidence, and system navigation."
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            'SELECT * FROM users WHERE LOWER(email)=?',
+            (email,)
+        )
+        user = cursor.fetchone()
+
+        if not user:
+            cursor.execute(
+                "INSERT INTO users (email, password, name, role, patient_type, attending_doctor, institution, status) "
+                "VALUES (?, ?, ?, 'Patient', 'PUBLIC', 'N/A', 'General Diagnostic Health Center', 'ACTIVE')",
+                (email, os.urandom(16).hex(), name)
+            )
+            conn.commit()
+            cursor.execute(
+                'SELECT * FROM users WHERE LOWER(email)=?',
+                (email,)
+            )
+            user = cursor.fetchone()
+
+        if not user:
+            conn.close()
+            return render_template(
+                'login.html',
+                error='Unable to create or retrieve the Google account.',
+                doctors=[]
+            )
+
+        if str(user['status']).upper() != 'ACTIVE':
+            conn.close()
+            return render_template(
+                'login.html',
+                error='This account is not active. Please contact the administrator.',
+                doctors=[]
+            )
+
+        conn.close()
+
+        # Populate the same session fields used by normal login.
+        session['user_id'] = user['id']
+        session['email'] = user['email']
+        session['user'] = user['name']
+        session['role'] = user['role']
+        session['patient_type'] = user['patient_type']
+        session['attending_doctor'] = user['attending_doctor']
+        session['institution'] = user['institution']
+
+        return redirect(url_for('dashboard'))
+
+    except Exception as exc:
+        return render_template(
+            'login.html',
+            error=f'Google sign-in failed: {exc}',
+            doctors=[]
         )
 
-        config_obj = types.GenerateContentConfig(
-            system_instruction=system_prompt,
-            temperature=0.3
-        )
 
-        # Retry loop for transient 503 / network errors
-        models_to_try = ['gemini-3.8-flash', 'gemini-2.0-flash', 'gemini-1.5-flash']
-        
-        for model_name in models_to_try:
-            for attempt in range(2):  # Try each model up to 2 times
-                try:
-                    response = gemini_client.models.generate_content(
-                        model=model_name,
-                        contents=user_message,
-                        config=config_obj
-                    )
-                    return jsonify({'response': response.text})
-                except Exception as err:
-                    print(f"[Gemini Retry] Attempt {attempt+1} on {model_name} failed: {err}")
-                    time.sleep(1)  # Brief pause before retrying
+@app.route('/auth/facebook')
+def facebook_login():
+    return render_template(
+        'login.html',
+        error='Facebook sign-in is not configured yet.',
+        doctors=[]
+    )
 
-        # Fallback response if all models/attempts are busy
-        return jsonify({
-            'response': "The AI Clinical Assistant is currently experiencing high demand from Google services. Please try sending your query again in a few seconds."
-        })
 
-    except Exception as e:
-        print(f"Gemini Chat API Failure: {repr(e)}")
-        return jsonify({
-            'response': "System temporarily unavailable. Please try your request again shortly."
-        }), 500
-    
+@app.route('/api/stats')
+def api_stats():
+       if 'user' not in session:          # use the session key your login sets
+           return jsonify(error='unauthorized'), 401
+
+       pneumonia, normal = get_stat_counts()
+       resp = jsonify(
+           pneumonia_count=pneumonia,
+           normal_count=normal,
+           total_count=pneumonia + normal,
+       )
+       resp.headers['Cache-Control'] = 'no-store'
+       return resp
+
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=5000, debug=True)
