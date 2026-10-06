@@ -2,151 +2,130 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Clinical Portal - Authentication</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
-    <style>
-        body { background-color: #0f172a; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        .auth-card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; max-width: 440px; margin: 50px auto; }
-        .form-control, .form-select { background-color: #0f172a; border-color: #334155; color: #ffffff; }
-        .form-control:focus, .form-select:focus { background-color: #0f172a; color: #ffffff; border-color: #0284c7; box-shadow: none; }
-        .input-group-text { background-color: #0f172a; border-color: #334155; color: #94a3b8; cursor: pointer; }
-        .nav-pills .nav-link { color: #94a3b8; border-radius: 4px; }
-        .nav-pills .nav-link.active { background-color: #0284c7; color: #ffffff; }
-        .btn-oauth { border: 1px solid #334155; color: #cbd5e1; background: #0f172a; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 0.85rem; padding: 8px; border-radius: 4px; font-weight: 600; }
-        .btn-oauth:hover { background: #1e293b; color: #ffffff; }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign in - Clinical Portal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='theme.css') }}">
 </head>
 <body>
 
-<div class="container">
-    <div class="card auth-card p-4 shadow">
-        <div class="text-center mb-4">
-            <h4 class="fw-bold text-white mb-1">General Diagnostic Center</h4>
-            <span class="text-secondary small">Clinical Diagnostic Imaging System</span>
-        </div>
+<main class="wrap wrap-auth wrap-center">
+    <div class="auth-head">
+        <h1>General Diagnostic Center</h1>
+        <p class="muted mb-0">Clinical diagnostic imaging system</p>
+    </div>
 
+    <div class="card">
         {% if error %}
-            <div class="alert alert-danger p-2 small mb-3">{{ error }}</div>
+            <div class="alert alert-error alert-compact" role="alert">
+                <div class="alert-body">{{ error }}</div>
+            </div>
         {% endif %}
 
         {% if success %}
-            <div class="alert alert-success p-2 small mb-3">{{ success }}</div>
+            <div class="alert alert-success alert-compact" role="status">
+                <div class="alert-body">{{ success }}</div>
+            </div>
         {% endif %}
 
-        <ul class="nav nav-pills nav-justified mb-4" id="authTabs">
-            <li class="nav-item">
-                <button class="nav-link active fw-bold" data-bs-toggle="pill" data-bs-target="#login-tab">Sign In</button>
-            </li>
-            <li class="nav-item">
-                <button class="nav-link fw-bold" data-bs-toggle="pill" data-bs-target="#register-tab">New Patient</button>
-            </li>
-        </ul>
+        <div>
+            <div class="tabs tabs-segmented mb-3" role="tablist" aria-label="Account access">
+                <button type="button" class="tab" role="tab" id="tab-login" aria-controls="login-tab" aria-selected="true" onclick="showAuthTab('login')">Sign in</button>
+                <button type="button" class="tab" role="tab" id="tab-register" aria-controls="register-tab" aria-selected="false" onclick="showAuthTab('register')">New patient</button>
+            </div>
 
-        <div class="tab-content">
             <!-- SIGN IN TAB -->
-            <div class="tab-pane fade show active" id="login-tab">
+            <div id="login-tab" role="tabpanel" aria-labelledby="tab-login">
                 <form action="/login" method="POST">
-                    <div class="mb-3">
-                        <label class="form-label text-secondary small fw-bold">Email Address</label>
-                        <input type="email" name="email" class="form-control" placeholder="Institutional or personal email" required>
+                    <div class="field">
+                        <label class="label" for="loginEmail">Email address</label>
+                        <input type="email" id="loginEmail" name="email" class="input" placeholder="Institutional or personal email" autocomplete="email" required>
                     </div>
-                    <div class="mb-4">
-                        <label class="form-label text-secondary small fw-bold">Password</label>
+                    <div class="field mb-3">
+                        <label class="label" for="loginPassword">Password</label>
                         <div class="input-group">
-                            <input type="password" id="loginPassword" name="password" class="form-control" placeholder="Enter password" required>
-                            <span class="input-group-text" onclick="togglePassword('loginPassword', 'loginEye')">
-                                <i class="bi bi-eye" id="loginEye"></i>
-                            </span>
+                            <input type="password" id="loginPassword" name="password" class="input" placeholder="Enter password" autocomplete="current-password" required>
+                            <button type="button" class="addon" onclick="togglePassword('loginPassword', this)" aria-pressed="false">Show</button>
                         </div>
                     </div>
-                    <button type="submit" class="btn btn-primary w-100 fw-bold py-2 mb-3" style="background-color: #0284c7; border: none;">Sign In</button>
+                    <button type="submit" class="btn btn-primary btn-block">Sign in</button>
                 </form>
 
-                <div class="position-relative text-center my-3">
-                    <hr class="border-secondary">
-                    <span class="position-absolute top-50 start-50 translate-middle px-2 text-muted small" style="background-color: #1e293b;">OR</span>
-                </div>
+                <div class="divider" aria-hidden="true">or</div>
 
-                <div class="d-grid gap-2 mb-2">
-                    <a href="/oauth_placeholder/google" class="btn-oauth">
-                        <i class="bi bi-google text-danger fs-6"></i> Sign in with Google
-                    </a>
-                    <a href="/oauth_placeholder/facebook" class="btn-oauth">
-                        <i class="bi bi-facebook text-primary fs-6"></i> Sign in with Facebook
-                    </a>
+                <div class="stack">
+                    <a href="{{ url_for('google_login') }}">Sign in with Google</a>
+                    <a href="{{ url_for('facebook_login') }}">Sign in with Facebook</a>
                 </div>
             </div>
 
             <!-- REGISTER TAB -->
-            <div class="tab-pane fade" id="register-tab">
+            <div id="register-tab" role="tabpanel" aria-labelledby="tab-register" hidden>
                 <form action="/register" method="POST">
-                    <div class="mb-3">
-                        <label class="form-label text-secondary small fw-bold">Full Name</label>
-                        <input type="text" name="name" class="form-control" placeholder="Full Name" required>
+                    <div class="field">
+                        <label class="label" for="regName">Full name</label>
+                        <input type="text" id="regName" name="name" class="input" placeholder="Full name" autocomplete="name" required>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label text-secondary small fw-bold">Email Address</label>
-                        <input type="email" name="email" class="form-control" placeholder="patient@mail.com" required>
+                    <div class="field">
+                        <label class="label" for="regEmail">Email address</label>
+                        <input type="email" id="regEmail" name="email" class="input" placeholder="patient@mail.com" autocomplete="email" required>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label text-secondary small fw-bold">Account Registration Type</label>
-                        <select name="patient_type" id="patientTypeSelect" class="form-select" onchange="toggleDoctorField()">
-                            <option value="PUBLIC">Public Patient (Self Evaluation)</option>
-                            <option value="PRIVATE_HOSPITAL">Private Hospital Patient (Attending Physician Linked)</option>
+                    <div class="field">
+                        <label class="label" for="patientTypeSelect">Account registration type</label>
+                        <select name="patient_type" id="patientTypeSelect" class="select" onchange="toggleDoctorField()">
+                            <option value="PUBLIC">Public patient (self evaluation)</option>
+                            <option value="PRIVATE_HOSPITAL">Private hospital patient (attending physician linked)</option>
                         </select>
                     </div>
 
-                    <div class="mb-3 d-none" id="doctorSelectGroup">
-                        <label class="form-label text-secondary small fw-bold">Attending Physician</label>
-                        <select name="attending_doctor" class="form-select">
-                            <option value="Unassigned">-- Select Attending Doctor --</option>
+                    <div class="field" id="doctorSelectGroup" hidden>
+                        <label class="label" for="attendingDoctor">Attending physician</label>
+                        <select name="attending_doctor" id="attendingDoctor" class="select">
+                            <option value="Unassigned">-- Select attending doctor --</option>
                             {% for doc in doctors %}
                                 <option value="{{ doc['name'] }}">{{ doc['name'] }}</option>
                             {% endfor %}
                         </select>
                     </div>
 
-                    <div class="mb-4">
-                        <label class="form-label text-secondary small fw-bold">Create Password</label>
+                    <div class="field mb-3">
+                        <label class="label" for="regPassword">Create password</label>
                         <div class="input-group">
-                            <input type="password" id="regPassword" name="password" class="form-control" placeholder="Password" required>
-                            <span class="input-group-text" onclick="togglePassword('regPassword', 'regEye')">
-                                <i class="bi bi-eye" id="regEye"></i>
-                            </span>
+                            <input type="password" id="regPassword" name="password" class="input" placeholder="Password" autocomplete="new-password" required>
+                            <button type="button" class="addon" onclick="togglePassword('regPassword', this)" aria-pressed="false">Show</button>
                         </div>
                     </div>
-                    <button type="submit" class="btn btn-success w-100 fw-bold py-2" style="background-color: #059669; border: none;">Create Patient Account</button>
+                    <button type="submit" class="btn btn-ok btn-block">Create patient account</button>
                 </form>
             </div>
         </div>
     </div>
-</div>
+</main>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    function togglePassword(inputId, eyeId) {
-        const passwordInput = document.getElementById(inputId);
-        const eyeIcon = document.getElementById(eyeId);
-        if (passwordInput.type === 'password') {
-            passwordInput.type = 'text';
-            eyeIcon.classList.remove('bi-eye');
-            eyeIcon.classList.add('bi-eye-slash');
-        } else {
-            passwordInput.type = 'password';
-            eyeIcon.classList.remove('bi-eye-slash');
-            eyeIcon.classList.add('bi-eye');
-        }
+    function togglePassword(inputId, btn) {
+        var input = document.getElementById(inputId);
+        if (!input) return;
+        var show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        btn.textContent = show ? 'Hide' : 'Show';
+        btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+    }
+
+    function showAuthTab(name) {
+        ['login', 'register'].forEach(function (n) {
+            var on = (n === name);
+            document.getElementById(n + '-tab').hidden = !on;
+            var tab = document.getElementById('tab-' + n);
+            tab.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
     }
 
     function toggleDoctorField() {
-        const patientType = document.getElementById('patientTypeSelect').value;
-        const doctorGroup = document.getElementById('doctorSelectGroup');
-        if (patientType === 'PRIVATE_HOSPITAL') {
-            doctorGroup.classList.remove('d-none');
-        } else {
-            doctorGroup.classList.add('d-none');
-        }
+        var patientType = document.getElementById('patientTypeSelect').value;
+        document.getElementById('doctorSelectGroup').hidden = (patientType !== 'PRIVATE_HOSPITAL');
     }
 </script>
 </body>
