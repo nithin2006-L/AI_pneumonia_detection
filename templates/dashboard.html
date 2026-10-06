@@ -2,121 +2,91 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Clinical Portal Dashboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Clinical Portal Dashboard</title>
-    <link href="[https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css](https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css)" rel="stylesheet">
-    <link href="[https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css](https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css)" rel="stylesheet">
-    <script src="[https://cdn.jsdelivr.net/npm/chart.js](https://cdn.jsdelivr.net/npm/chart.js)"></script>
-    <style>
-        body { background-color: #f8fafc; color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        .top-bar { background: #ffffff; border-bottom: 1px solid #e2e8f0; }
-        .nav-tabs .nav-link { color: #64748b; font-weight: 500; }
-        .nav-tabs .nav-link.active { color: #0284c7; font-weight: 600; border-bottom: 2px solid #0284c7; }
-        .card-custom { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; }
-        .audit-state-box { font-family: -apple-system, BlinkMacSystemFont, monospace; font-size: 0.8rem; padding: 6px; border: 1px solid #e2e8f0; border-radius: 4px; background-color: #ffffff; color: #334155; white-space: pre-wrap; word-break: break-word; max-width: 280px; }
-        
-        /* Floating Chatbot Widget */
-        .chat-widget-button { position: fixed; bottom: 20px; right: 20px; background-color: #0284c7; color: #ffffff; border: none; border-radius: 50%; width: 50px; height: 50px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); cursor: pointer; z-index: 1000; font-size: 20px; display: flex; align-items: center; justify-content: center; }
-        .chat-widget-box { position: fixed; bottom: 80px; right: 20px; width: 340px; height: 420px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); display: none; flex-direction: column; z-index: 1000; overflow: hidden; }
-        .chat-header { background: #0f172a; color: #ffffff; padding: 10px 14px; font-weight: 600; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; }
-        .chat-body { flex: 1; padding: 12px; overflow-y: auto; background: #ffffff; font-size: 0.82rem; }
-        .chat-footer { padding: 8px; background: #f8fafc; border-top: 1px solid #e2e8f0; display: flex; gap: 6px; }
-        .chat-msg { margin-bottom: 8px; padding: 8px 10px; border-radius: 4px; max-width: 85%; font-size: 0.8rem; }
-        .chat-msg.bot { background: #f1f5f9; color: #0f172a; border: 1px solid #e2e8f0; align-self: flex-start; }
-        .chat-msg.user { background: #0284c7; color: #ffffff; margin-left: auto; align-self: flex-end; }
-    </style>
-</head>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='theme.css') }}">
 <body>
+{% set private_patient = (role == 'Patient' and patient_type == 'PRIVATE_HOSPITAL') %}
 
-<div class="top-bar px-4 py-3 d-flex justify-content-between align-items-center">
-    <div>
-        <span class="fw-bold fs-5 text-dark">{{ institution }}</span>
-        <span class="text-muted ms-2 fs-6">| Diagnostic Imaging Portal</span>
-    </div>
-    
-    <div class="d-flex align-items-center gap-4">
-        <div class="text-end">
-            <span class="d-block fw-bold text-dark small">User: {{ user }}</span>
-            <span class="d-block text-muted small">Role: {{ role }} {% if role == 'Patient' %}({{ patient_type }}){% endif %}</span>
+<header class="topbar">
+    <div class="topbar-inner">
+        <div class="brand">
+            <span class="brand-name">{{ institution }}</span>
+            <span class="brand-sub">Diagnostic imaging portal</span>
         </div>
-        <a href="/logout" class="btn btn-outline-danger btn-sm fw-bold">Sign Out</a>
+        <div class="userbox">
+            <div class="user-meta">
+                <strong>{{ user }}</strong>
+                <span>{{ role }}{% if role == 'Patient' %} ({{ patient_type }}){% endif %}</span>
+            </div>
+            <a href="/logout" class="btn btn-danger btn-sm">Sign out</a>
+        </div>
     </div>
-</div>
+</header>
 
-<div class="container my-4">
+<main class="wrap">
 
     <!-- INVALID IMAGE / SYSTEM WARNING ALERT BANNER -->
     {% if error %}
-    <div class="alert alert-danger alert-dismissible fade show mb-4 shadow-sm" role="alert" style="border-left: 5px solid #dc3545; background-color: #f8d7da; color: #842029;">
-        <div class="d-flex align-items-center">
-            <i class="bi bi-exclamation-triangle-fill me-3 fs-4 text-danger"></i>
-            <div>
-                <strong class="d-block fs-6">Validation Warning:</strong>
-                <span>{{ error }}</span>
+    <div class="alert alert-error" role="alert">
+        <div class="alert-body">
+            <strong>&#9888; Upload rejected</strong>
+            {{ error }}
+            <div style="margin-top:6px;font-size:.9em;opacity:.9;">
+                Accepted: frontal chest X-ray in PNG, JPG/JPEG or DICOM (.dcm) format, up to 25&nbsp;MB.
+                Photos, screenshots, documents and other body parts are not processed.
             </div>
         </div>
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        <button type="button" class="alert-dismiss" data-dismiss aria-label="Dismiss warning">&times;</button>
     </div>
     {% endif %}
 
-    <ul class="nav nav-tabs mb-4" id="portalTabs" role="tablist">
-        {% if role != 'Patient' or patient_type != 'PRIVATE_HOSPITAL' %}
-        <li class="nav-item">
-            <button class="nav-link active" id="scan-tab" data-bs-toggle="tab" data-bs-target="#scan-panel">New Evaluation</button>
-        </li>
-        {% endif %}
-        <li class="nav-item">
-            <button class="nav-link {% if role == 'Patient' and patient_type == 'PRIVATE_HOSPITAL' %}active{% endif %}" id="history-tab" data-bs-toggle="tab" data-bs-target="#history-panel">
-                {% if role in ['Doctor', 'Administrator'] %}
-                    Master Patient Records
-                {% else %}
-                    My Personal Records
-                {% endif %}
+    <div data-tabs>
+        <div class="tabs" role="tablist" aria-label="Portal sections">
+            {% if not private_patient %}
+            <button type="button" class="tab" role="tab" id="scan-tab" aria-controls="scan-panel" aria-selected="true">New evaluation</button>
+            {% endif %}
+            <button type="button" class="tab" role="tab" id="history-tab" aria-controls="history-panel" aria-selected="{{ 'true' if private_patient else 'false' }}">
+                {% if role in ['Doctor', 'Administrator'] %}Master patient records{% else %}My personal records{% endif %}
             </button>
-        </li>
-        <li class="nav-item">
-            <button class="nav-link" id="analytics-tab" data-bs-toggle="tab" data-bs-target="#analytics-panel">Diagnostic Statistics</button>
-        </li>
-        {% if role == 'Administrator' %}
-        <li class="nav-item">
-            <button class="nav-link text-dark fw-bold" id="admin-tab" data-bs-toggle="tab" data-bs-target="#admin-panel">Admin Management & Audit Trail</button>
-        </li>
-        {% endif %}
-    </ul>
+            <button type="button" class="tab" role="tab" id="analytics-tab" aria-controls="analytics-panel" aria-selected="false">Diagnostic statistics</button>
+            {% if role == 'Administrator' %}
+            <button type="button" class="tab" role="tab" id="admin-tab" aria-controls="admin-panel" aria-selected="false">Admin management &amp; audit trail</button>
+            {% endif %}
+        </div>
 
-    <div class="tab-content" id="portalTabsContent">
         <!-- TAB 1: NEW SCAN -->
-        {% if role != 'Patient' or patient_type != 'PRIVATE_HOSPITAL' %}
-        <div class="tab-pane fade show active" id="scan-panel">
-            <div class="card card-custom p-4">
-                <h6 class="fw-bold mb-3 text-dark border-bottom pb-2">Patient Intake and Diagnostic Evaluation</h6>
-                <form action="/predict" method="POST" enctype="multipart/form-data">
-                    <div class="row g-3 mb-3">
-                        <div class="col-md-6">
-                            <label class="form-label text-secondary small fw-bold">Institution Name</label>
-                            <input type="text" name="institution_name" class="form-control" value="{{ institution }}" required>
+        {% if not private_patient %}
+        <div id="scan-panel" role="tabpanel" aria-labelledby="scan-tab">
+            <section class="card">
+                <h2 class="card-title">Patient intake and diagnostic evaluation</h2>
+                <form action="/predict" method="POST" enctype="multipart/form-data" id="scan_form">
+                    <div class="fields fields-2">
+                        <div class="field">
+                            <label class="label" for="institution_name">Institution name</label>
+                            <input type="text" id="institution_name" name="institution_name" class="input" value="{{ institution }}" required>
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label text-secondary small fw-bold">Evaluator Auto-Fill</label>
-                            <input type="text" class="form-control bg-light" value="{{ user }} ({{ role }})" readonly>
+                        <div class="field">
+                            <label class="label" for="evaluator">Evaluator (auto-filled)</label>
+                            <input type="text" id="evaluator" class="input" value="{{ user }} ({{ role }})" readonly>
                         </div>
-                        <div class="col-md-4">
-                            <label class="form-label text-secondary small fw-bold">Patient Name</label>
-                            <input type="text" name="patient_name" class="form-control" value="{% if role == 'Patient' %}{{ user }}{% endif %}" placeholder="Enter full name" required>
+                    </div>
+
+                    <div class="fields fields-3">
+                        <div class="field">
+                            <label class="label" for="patient_name">Patient name</label>
+                            <input type="text" id="patient_name" name="patient_name" class="input" value="{% if role == 'Patient' %}{{ user }}{% endif %}" placeholder="Enter full name" required>
                         </div>
-                        <div class="col-md-4">
-                            <label class="form-label text-secondary small fw-bold">Patient Age</label>
-                            <input type="number" name="patient_age" class="form-control" placeholder="Years" required>
+                        <div class="field">
+                            <label class="label" for="patient_age">Patient age</label>
+                            <input type="number" id="patient_age" name="patient_age" class="input" placeholder="Years" required>
                         </div>
-                        <div class="col-md-4">
-                            <label class="form-label text-secondary small fw-bold">Gender</label>
-                            <select name="patient_gender" class="form-select">
+                        <div class="field">
+                            <label class="label" for="patient_gender">Gender</label>
+                            <select name="patient_gender" id="patient_gender" class="select">
                                 <option value="Female">Female</option>
                                 <option value="Male">Male</option>
                                 <option value="Other">Other</option>
@@ -124,41 +94,39 @@
                         </div>
                     </div>
 
-                    <div class="mb-3">
-                        <label class="form-label text-secondary small fw-bold">Clinical History / Symptoms</label>
-                        <textarea name="clinical_history" class="form-control" rows="2" placeholder="Clinical history or symptoms..."></textarea>
+                    <div class="field">
+                        <label class="label" for="clinical_history">Clinical history / symptoms</label>
+                        <textarea name="clinical_history" id="clinical_history" class="textarea" rows="2" placeholder="Clinical history or symptoms..."></textarea>
                     </div>
 
-                    <div class="mb-4">
-                        <label class="form-label text-secondary small fw-bold">Chest Radiograph File (.png, .jpg, .jpeg, .dcm)</label>
-                        <input type="file" name="file" class="form-control" accept="image/*,.dcm" required>
+                    <div class="field mb-3">
+                        <label class="label" for="scan_file">Chest radiograph file (.png, .jpg, .jpeg, .dcm)</label>
+                        <input type="file" id="scan_file" name="file" class="input" accept=".png,.jpg,.jpeg,.dcm,image/png,image/jpeg" required>
+                        <p id="scan_file_warning" role="alert" hidden
+                           style="margin-top:6px;color:#ff6b6b;font-size:.9em;"></p>
                     </div>
 
-                    <button type="submit" class="btn btn-primary w-100 py-2 fw-bold" style="background-color: #0284c7; border: none;">Run Diagnostic Assessment</button>
+                    <button type="submit" id="scan_submit" class="btn btn-primary btn-block">Run diagnostic assessment</button>
                 </form>
-            </div>
+            </section>
         </div>
         {% endif %}
 
         <!-- TAB 2: HISTORY DATABASE -->
-        <div class="tab-pane fade {% if role == 'Patient' and patient_type == 'PRIVATE_HOSPITAL' %}show active{% endif %}" id="history-panel">
-            <div class="card card-custom p-4">
-                <h6 class="fw-bold mb-3 text-dark border-bottom pb-2">
-                    {% if role in ['Doctor', 'Administrator'] %}
-                        Master Patient Records Database
-                    {% else %}
-                        My Personal Diagnostic History
-                    {% endif %}
-                </h6>
+        <div id="history-panel" role="tabpanel" aria-labelledby="history-tab" {% if not private_patient %}hidden{% endif %}>
+            <section class="card">
+                <h2 class="card-title">
+                    {% if role in ['Doctor', 'Administrator'] %}Master patient records database{% else %}My personal diagnostic history{% endif %}
+                </h2>
                 {% if history %}
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle">
-                        <thead class="table-light">
+                <div class="table-wrap">
+                    <table>
+                        <thead>
                             <tr>
                                 <th>Report ID</th>
                                 <th>Timestamp</th>
-                                <th>Patient Name</th>
-                                <th>Evaluated By</th>
+                                <th>Patient name</th>
+                                <th>Evaluated by</th>
                                 <th>Classification</th>
                                 <th>Confidence</th>
                                 <th>Actions</th>
@@ -170,22 +138,24 @@
                                 <td>#{{ rec['id'] }}</td>
                                 <td>{{ rec['timestamp'] }}</td>
                                 <td><strong>{{ rec['patient_name'] }}</strong></td>
-                                <td><span class="small text-muted">{{ rec['evaluator_name'] }} ({{ rec['evaluator_role'] }})</span></td>
+                                <td><span class="small muted">{{ rec['evaluator_name'] }} ({{ rec['evaluator_role'] }})</span></td>
                                 <td>
                                     {% if rec['prediction'] == 'PNEUMONIA' %}
-                                        <span class="badge bg-danger">PNEUMONIA</span>
+                                        <span class="badge badge-bad">PNEUMONIA</span>
                                     {% else %}
-                                        <span class="badge bg-success">NORMAL</span>
+                                        <span class="badge badge-ok">NORMAL</span>
                                     {% endif %}
                                 </td>
                                 <td>{{ rec['confidence'] }}%</td>
-                                <td class="d-flex gap-2">
-                                    <a href="/report/{{ rec['id'] }}" class="btn btn-sm btn-outline-primary fw-bold">View Report</a>
-                                    {% if role in ['Doctor', 'Administrator'] %}
-                                    <form action="/delete_report/{{ rec['id'] }}" method="POST" onsubmit="return confirm('Are you sure you want to delete Report #{{ rec.id }}? Action will be logged in audit trail.');">
-                                        <button type="submit" class="btn btn-sm btn-outline-danger fw-bold">Delete</button>
-                                    </form>
-                                    {% endif %}
+                                <td>
+                                    <div class="actions">
+                                        <a href="/report/{{ rec['id'] }}" class="btn btn-sm btn-primary">View report</a>
+                                        {% if role in ['Doctor', 'Administrator'] %}
+                                        <form action="/delete_report/{{ rec['id'] }}" method="POST" onsubmit="return confirm('Are you sure you want to delete Report #{{ rec.id }}? Action will be logged in audit trail.');">
+                                            <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                                        </form>
+                                        {% endif %}
+                                    </div>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -193,71 +163,67 @@
                     </table>
                 </div>
                 {% else %}
-                <div class="p-4 text-center text-muted border rounded">
-                    No diagnostic records located in current view.
-                </div>
+                <div class="empty">No diagnostic records in this view yet.</div>
                 {% endif %}
-            </div>
+            </section>
         </div>
 
-        <!-- TAB 3: STATISTICS -->
-        <div class="tab-pane fade" id="analytics-panel">
-            <div class="card card-custom p-4">
-                <h6 class="fw-bold mb-3 text-dark border-bottom pb-2">Diagnostic Overview Statistics</h6>
-                {% if total_count > 0 %}
-                <div class="row align-items-center">
-                    <div class="col-md-6 text-center">
-                        <div style="max-width: 280px; margin: 0 auto;">
-                            <canvas id="diagChart" data-chart-values="{{ [pneumonia_count, normal_count] | tojson }}"></canvas>
+        <!-- TAB 3: STATISTICS (pie is drawn client-side as SVG and refreshed from /api/stats) -->
+        <div id="analytics-panel" role="tabpanel" aria-labelledby="analytics-tab" hidden>
+            <section class="card">
+                <h2 class="card-title">Diagnostic overview statistics</h2>
+
+                <div id="statsRoot" data-stats-url="/api/stats" data-pneumonia="{{ pneumonia_count|default(0) }}" data-normal="{{ normal_count|default(0) }}">
+                    <div class="stats" id="statsContent">
+                        <div class="chart-box">
+                            <svg id="diagPie" viewBox="-110 -110 220 220" role="img" aria-label="Pie chart of pneumonia versus normal scans"></svg>
+                        </div>
+                        <div class="panel panel-accent">
+                            <h3>Diagnostic summary</h3>
+                            <p class="small mb-1">Total evaluated radiographs: <strong id="statTotal">0</strong></p>
+                            <div class="legend-row small"><span class="swatch" style="background: var(--bad);"></span> Pneumonia scans: <strong id="statPneumonia">0</strong> <span class="muted" id="statPneumoniaPct"></span></div>
+                            <div class="legend-row small"><span class="swatch" style="background: var(--ok);"></span> Normal scans: <strong id="statNormal">0</strong> <span class="muted" id="statNormalPct"></span></div>
+                            <p class="small muted mt-2 mb-0" id="statsStatus" aria-live="polite">Updates automatically.</p>
                         </div>
                     </div>
-                    <div class="col-md-6">
-                        <div class="p-3 border rounded bg-white">
-                            <h6 class="fw-bold mb-3">Diagnostic Summary</h6>
-                            <p class="mb-2 small">Total Evaluated Radiographs: <strong>{{ total_count }}</strong></p>
-                            <p class="mb-2 small text-danger">Pneumonia Scans: <strong>{{ pneumonia_count }}</strong></p>
-                            <p class="mb-0 small text-success">Normal Scans: <strong>{{ normal_count }}</strong></p>
-                        </div>
-                    </div>
+                    <div class="empty" id="statsEmpty" hidden>No statistical data available yet. Run an evaluation to see results here.</div>
                 </div>
-                {% else %}
-                <div class="p-4 text-center text-muted border rounded">
-                    No statistical data available.
-                </div>
-                {% endif %}
-            </div>
+            </section>
         </div>
 
-        <!-- TAB 4: CLEAN ADMIN PANEL -->
+        <!-- TAB 4: ADMIN PANEL -->
         {% if role == 'Administrator' %}
-        <div class="tab-pane fade" id="admin-panel">
+        <div id="admin-panel" role="tabpanel" aria-labelledby="admin-tab" hidden>
             <!-- Doctor Roster -->
-            <div class="card card-custom p-4 mb-4">
-                <h6 class="fw-bold mb-3 text-dark border-bottom pb-2">Hospital Doctor Roster Authorization</h6>
-                
-                <form action="/admin/add_doctor" method="POST" class="row g-2 mb-4 p-2 border rounded bg-white">
-                    <div class="col-md-4">
-                        <input type="text" name="name" class="form-control form-control-sm" placeholder="Doctor Full Name (e.g. Dr. Ray)" required>
-                    </div>
-                    <div class="col-md-4">
-                        <input type="email" name="email" class="form-control form-control-sm" placeholder="doctor@hospital.org" required>
-                    </div>
-                    <div class="col-md-2">
-                        <input type="password" name="password" class="form-control form-control-sm" placeholder="Password" required>
-                    </div>
-                    <div class="col-md-2">
-                        <button type="submit" class="btn btn-primary btn-sm w-100 fw-bold">Authorize Doctor</button>
+            <section class="card">
+                <h2 class="card-title">Hospital doctor roster authorization</h2>
+
+                <form action="/admin/add_doctor" method="POST" class="panel panel-accent mb-3">
+                    <div class="fields fields-doctor mb-0">
+                        <div class="field">
+                            <label class="label" for="doc_name">Full name</label>
+                            <input type="text" id="doc_name" name="name" class="input input-sm" placeholder="e.g. Dr. Ray" required>
+                        </div>
+                        <div class="field">
+                            <label class="label" for="doc_email">Email</label>
+                            <input type="email" id="doc_email" name="email" class="input input-sm" placeholder="doctor@hospital.org" required>
+                        </div>
+                        <div class="field">
+                            <label class="label" for="doc_password">Password</label>
+                            <input type="password" id="doc_password" name="password" class="input input-sm" placeholder="Password" autocomplete="new-password" required>
+                        </div>
+                        <button type="submit" class="btn btn-sm btn-primary">Authorize doctor</button>
                     </div>
                 </form>
 
-                <div class="table-responsive">
-                    <table class="table table-sm table-bordered align-middle">
-                        <thead class="table-light">
+                <div class="table-wrap">
+                    <table>
+                        <thead>
                             <tr>
-                                <th>Doctor Name</th>
-                                <th>Institutional Email</th>
-                                <th>Account Status</th>
-                                <th>Status Override</th>
+                                <th>Doctor name</th>
+                                <th>Institutional email</th>
+                                <th>Account status</th>
+                                <th>Status override</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -267,17 +233,17 @@
                                 <td>{{ doc['email'] }}</td>
                                 <td>
                                     {% if doc['status'] == 'ACTIVE' %}
-                                        <span class="text-success fw-bold small">ACTIVE</span>
+                                        <span class="badge badge-ok">ACTIVE</span>
                                     {% else %}
-                                        <span class="text-danger fw-bold small">BLOCKED</span>
+                                        <span class="badge badge-bad">BLOCKED</span>
                                     {% endif %}
                                 </td>
                                 <td>
                                     <form action="/admin/toggle_doctor_status/{{ doc['id'] }}" method="POST">
                                         {% if doc['status'] == 'ACTIVE' %}
-                                            <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-2 fw-bold">Block Access</button>
+                                            <button type="submit" class="btn btn-sm btn-danger">Block access</button>
                                         {% else %}
-                                            <button type="submit" class="btn btn-sm btn-outline-success py-0 px-2 fw-bold">Activate Access</button>
+                                            <button type="submit" class="btn btn-sm btn-ok">Activate access</button>
                                         {% endif %}
                                     </form>
                                 </td>
@@ -286,36 +252,36 @@
                         </tbody>
                     </table>
                 </div>
-            </div>
+            </section>
 
-            <!-- Clean System Audit Trail -->
-            <div class="card card-custom p-4">
-                <h6 class="fw-bold mb-3 text-dark border-bottom pb-2">System Audit Log (Before & After Report Details)</h6>
+            <!-- System Audit Trail -->
+            <section class="card">
+                <h2 class="card-title">System audit log (before &amp; after report details)</h2>
                 {% if audit_logs %}
-                <div class="table-responsive">
-                    <table class="table table-sm table-bordered align-middle">
-                        <thead class="table-light">
+                <div class="table-wrap">
+                    <table>
+                        <thead>
                             <tr>
                                 <th>Timestamp</th>
                                 <th>User</th>
                                 <th>Role</th>
                                 <th>Action</th>
                                 <th>Target ID</th>
-                                <th>State BEFORE Modification</th>
-                                <th>State AFTER Modification</th>
-                                <th>Audit Details</th>
+                                <th>State before</th>
+                                <th>State after</th>
+                                <th>Details</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for log in audit_logs %}
                             <tr>
-                                <td class="small text-muted">{{ log['timestamp'] }}</td>
+                                <td class="small muted">{{ log['timestamp'] }}</td>
                                 <td><strong>{{ log['performed_by'] }}</strong></td>
-                                <td><span class="small text-secondary">{{ log['user_role'] }}</span></td>
+                                <td><span class="small muted">{{ log['user_role'] }}</span></td>
                                 <td><code>{{ log['action'] }}</code></td>
                                 <td>{% if log['target_report_id'] %}#{{ log['target_report_id'] }}{% else %}N/A{% endif %}</td>
-                                <td><div class="audit-state-box">{{ log['before_state'] if log['before_state'] else 'N/A' }}</div></td>
-                                <td><div class="audit-state-box">{{ log['after_state'] if log['after_state'] else 'N/A' }}</div></td>
+                                <td><div class="audit-state">{{ log['before_state'] if log['before_state'] else 'N/A' }}</div></td>
+                                <td><div class="audit-state">{{ log['after_state'] if log['after_state'] else 'N/A' }}</div></td>
                                 <td class="small">{{ log['details'] }}</td>
                             </tr>
                             {% endfor %}
@@ -323,61 +289,188 @@
                     </table>
                 </div>
                 {% else %}
-                <div class="text-muted small">No audit records registered.</div>
+                <div class="empty">No audit records registered.</div>
                 {% endif %}
-            </div>
+            </section>
         </div>
         {% endif %}
     </div>
-</div>
+</main>
 
 <!-- AI Chatbot Floating Widget -->
-<button class="chat-widget-button" onclick="toggleChatbot()">
-    <i class="bi bi-chat-dots"></i>
-</button>
+<button type="button" class="btn btn-primary chat-fab" onclick="toggleChatbot()" aria-controls="chatbotBox" aria-label="Open clinical assistant">Ask assistant</button>
 
-<div class="chat-widget-box" id="chatbotBox">
+<div class="chat-box" id="chatbotBox" role="dialog" aria-label="Clinical assistant">
     <div class="chat-header">
-        <span>Clinical Assistant</span>
-        <i class="bi bi-x-lg" style="cursor: pointer;" onclick="toggleChatbot()"></i>
+        <span>Clinical assistant</span>
+        <button type="button" class="chat-close" onclick="toggleChatbot()" aria-label="Close assistant">&times;</button>
     </div>
-    <div class="chat-body" id="chatBody">
+    <div class="chat-body" id="chatBody" aria-live="polite">
         <div class="chat-msg bot">
-            Hello {{ user }}! Ask me about Grad-CAM heatmaps, user roles, duplicate checks, or audit logs.
+            Hello {{ user }}! Ask a general question or get help understanding the portal and its features.
         </div>
     </div>
     <div class="chat-footer">
-        <input type="text" id="chatInput" class="form-control form-control-sm" placeholder="Ask a question..." onkeypress="handleChatKey(event)">
-        <button class="btn btn-sm btn-primary" onclick="sendChatMessage()"><i class="bi bi-send"></i></button>
+        <input type="text" id="chatInput" class="input input-sm" placeholder="Ask a question..." aria-label="Your question" onkeypress="handleChatKey(event)">
+        <button type="button" class="btn btn-sm btn-primary" onclick="sendChatMessage()">Send</button>
     </div>
 </div>
 
-<script src="[https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js](https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js)"></script>
-{% if total_count > 0 %}
+<script src="{{ url_for('static', filename='js/ui.js') }}"></script>
 <script>
-    const diagChartCanvas = document.getElementById('diagChart');
-    if (diagChartCanvas) {
-        const ctx = diagChartCanvas.getContext('2d');
-        const chartValues = JSON.parse(diagChartCanvas.dataset.chartValues);
-        new Chart(ctx, {
-            type: 'pie',
-            data: {
-                labels: ['Pneumonia', 'Normal'],
-                datasets: [{
-                    data: chartValues,
-                    backgroundColor: ['#dc2626', '#16a34a']
-                }]
-            }
-        });
+// Instant client-side pre-check. The server-side X-ray validation is the real gate.
+(function () {
+    var input = document.getElementById('scan_file');
+    var form = document.getElementById('scan_form');
+    if (!input || !form) return;
+    var warn = document.getElementById('scan_file_warning');
+    var btn = document.getElementById('scan_submit');
+    var ALLOWED = ['png', 'jpg', 'jpeg', 'dcm'];
+    var MAX_BYTES = 25 * 1024 * 1024;
+
+    function showWarning(msg) {
+        warn.textContent = msg;
+        warn.hidden = !msg;
     }
+
+    input.addEventListener('change', function () {
+        showWarning('');
+        var f = input.files && input.files[0];
+        if (!f) return;
+        var ext = (f.name.split('.').pop() || '').toLowerCase();
+        if (ALLOWED.indexOf(ext) === -1) {
+            showWarning('"' + f.name + '" is not a supported chest X-ray format. Use PNG, JPG, JPEG or DICOM (.dcm).');
+            input.value = '';
+        } else if (f.size > MAX_BYTES) {
+            showWarning('File is larger than 25 MB. Please upload a smaller chest X-ray.');
+            input.value = '';
+        } else if (f.size === 0) {
+            showWarning('The selected file is empty.');
+            input.value = '';
+        }
+    });
+
+    form.addEventListener('submit', function () {
+        if (btn) { btn.disabled = true; btn.textContent = 'Validating X-ray and running assessment\u2026'; }
+    });
+    // Re-enable if the user navigates back to the page (bfcache)
+    window.addEventListener('pageshow', function () {
+        if (btn) { btn.disabled = false; btn.textContent = 'Run diagnostic assessment'; }
+    });
+})();
 </script>
-{% endif %}
+<script>
+(function () {
+    var root = document.getElementById('statsRoot');
+    if (!root) return;
+
+    var svg = document.getElementById('diagPie');
+    var NS = 'http://www.w3.org/2000/svg';
+    var RADIUS = 100;
+    var COLORS = { pneumonia: '#ff6b6b', normal: '#88e788' };
+    var current = { pneumonia: -1, normal: -1 };
+
+    function el(name, attrs) {
+        var node = document.createElementNS(NS, name);
+        Object.keys(attrs || {}).forEach(function (k) { node.setAttribute(k, attrs[k]); });
+        return node;
+    }
+
+    function point(angleDeg, r) {
+        var a = (angleDeg - 90) * Math.PI / 180;           // 0 degrees = 12 o'clock, clockwise
+        return { x: r * Math.cos(a), y: r * Math.sin(a) };
+    }
+
+    function pct(part, total) {
+        return total ? Math.round(part / total * 1000) / 10 : 0;   // one decimal place
+    }
+
+    function drawSlice(startDeg, endDeg, color, label) {
+        var sweep = endDeg - startDeg;
+        var g = el('g');
+        if (sweep >= 359.99) {                              // a single category fills the whole pie
+            g.appendChild(el('circle', { cx: 0, cy: 0, r: RADIUS, fill: color, stroke: '#000', 'stroke-width': 3 }));
+        } else {
+            var a = point(startDeg, RADIUS), b = point(endDeg, RADIUS);
+            var large = sweep > 180 ? 1 : 0;
+            g.appendChild(el('path', {
+                d: 'M0 0 L' + a.x + ' ' + a.y + ' A' + RADIUS + ' ' + RADIUS + ' 0 ' + large + ' 1 ' + b.x + ' ' + b.y + ' Z',
+                fill: color, stroke: '#000', 'stroke-width': 3, 'stroke-linejoin': 'round'
+            }));
+        }
+        var mid = point((startDeg + endDeg) / 2, sweep >= 359.99 ? 0 : RADIUS * 0.58);
+        var text = el('text', { x: mid.x, y: mid.y, 'text-anchor': 'middle', 'dominant-baseline': 'central', 'class': 'pie-label' });
+        text.textContent = label;
+        g.appendChild(text);
+        return g;
+    }
+
+    function render(pneumonia, normal) {
+        pneumonia = Math.max(0, parseInt(pneumonia, 10) || 0);
+        normal = Math.max(0, parseInt(normal, 10) || 0);
+        if (pneumonia === current.pneumonia && normal === current.normal) return;
+        current = { pneumonia: pneumonia, normal: normal };
+
+        var total = pneumonia + normal;
+        var pPct = pct(pneumonia, total), nPct = pct(normal, total);
+
+        document.getElementById('statTotal').textContent = total;
+        document.getElementById('statPneumonia').textContent = pneumonia;
+        document.getElementById('statNormal').textContent = normal;
+        document.getElementById('statPneumoniaPct').textContent = total ? '(' + pPct + '%)' : '';
+        document.getElementById('statNormalPct').textContent = total ? '(' + nPct + '%)' : '';
+        document.getElementById('statsContent').hidden = total === 0;
+        document.getElementById('statsEmpty').hidden = total !== 0;
+
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+        if (total === 0) return;
+
+        var pAngle = pneumonia / total * 360;
+        if (pneumonia > 0) svg.appendChild(drawSlice(0, pAngle, COLORS.pneumonia, pPct + '%'));
+        if (normal > 0) svg.appendChild(drawSlice(pAngle, 360, COLORS.normal, nPct + '%'));
+        svg.setAttribute('aria-label', 'Pie chart: pneumonia ' + pneumonia + ' (' + pPct + '%), normal ' + normal + ' (' + nPct + '%)');
+    }
+
+    // Draw immediately from the numbers the server rendered into the page.
+    render(root.dataset.pneumonia, root.dataset.normal);
+
+    // Then keep it live by polling the stats endpoint.
+    var url = root.dataset.statsUrl;
+    var status = document.getElementById('statsStatus');
+    var INTERVAL_MS = 10000;
+    var busy = false;
+
+    function refresh() {
+        if (!url || busy || document.hidden) return;
+        busy = true;
+        fetch(url, { credentials: 'same-origin', cache: 'no-store', headers: { 'Accept': 'application/json' } })
+            .then(function (res) { if (!res.ok) throw new Error(res.status); return res.json(); })
+            .then(function (data) {
+                render(data.pneumonia_count, data.normal_count);
+                status.textContent = 'Live. Last updated ' + new Date().toLocaleTimeString() + '.';
+            })
+            .catch(function () { status.textContent = 'Live updates unavailable. Showing the last known counts.'; })
+            .finally(function () { busy = false; });
+    }
+
+    setInterval(refresh, INTERVAL_MS);
+    document.addEventListener('visibilitychange', refresh);
+    var statsTab = document.getElementById('analytics-tab');
+    if (statsTab) statsTab.addEventListener('click', refresh);
+    refresh();
+})();
+</script>
 
 <script>
+    var chatHistory = [];
+    var chatRequestPending = false;
+
     function toggleChatbot() {
-        const box = document.getElementById('chatbotBox');
+        var box = document.getElementById('chatbotBox');
         if (!box) return;
-        box.style.display = (box.style.display === 'flex') ? 'none' : 'flex';
+        var open = box.style.display === 'flex';
+        box.style.display = open ? 'none' : 'flex';
+        if (!open) { var i = document.getElementById('chatInput'); if (i) i.focus(); }
     }
 
     function handleChatKey(e) {
@@ -386,42 +479,49 @@
         }
     }
 
+    function appendChat(body, cls, text) {
+        var el = document.createElement('div');
+        el.className = 'chat-msg ' + cls;
+        el.innerText = text;
+        body.appendChild(el);
+        body.scrollTop = body.scrollHeight;
+        return el;
+    }
+
     function sendChatMessage() {
-        const input = document.getElementById('chatInput');
-        const body = document.getElementById('chatBody');
+        var input = document.getElementById('chatInput');
+        var body = document.getElementById('chatBody');
 
-        if (!input || !body) return;
+        if (!input || !body || chatRequestPending) return;
 
-        const text = input.value.trim();
+        var text = input.value.trim();
         if (!text) return;
 
-        const userMsg = document.createElement('div');
-        userMsg.className = 'chat-msg user';
-        userMsg.innerText = text;
-        body.appendChild(userMsg);
-
+        appendChat(body, 'user', text);
         input.value = '';
-        body.scrollTop = body.scrollHeight;
+        chatHistory.push({ role: 'user', content: text });
+        chatRequestPending = true;
+        input.disabled = true;
 
         fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: text })
+            body: JSON.stringify({ message: text, history: chatHistory.slice(0, -1) })
         })
-        .then((res) => res.json())
-        .then((data) => {
-            const botMsg = document.createElement('div');
-            botMsg.className = 'chat-msg bot';
-            botMsg.innerText = data.response || 'I could not generate a response.';
-            body.appendChild(botMsg);
-            body.scrollTop = body.scrollHeight;
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+            var reply = appendChat(body, 'bot', data.response || 'I could not generate a response.');
+            chatHistory.push({ role: 'assistant', content: reply.innerText });
         })
-        .catch(() => {
-            const botMsg = document.createElement('div');
-            botMsg.className = 'chat-msg bot';
-            botMsg.innerText = 'Query error. Please try again.';
-            body.appendChild(botMsg);
-            body.scrollTop = body.scrollHeight;
+        .catch(function () {
+            var reply = appendChat(body, 'bot', 'Query error. Please try again.');
+            chatHistory.push({ role: 'assistant', content: reply.innerText });
+        })
+        .finally(function () {
+            if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
+            chatRequestPending = false;
+            input.disabled = false;
+            input.focus();
         });
     }
 </script>
